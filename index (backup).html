@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8">
+    <title>skillsPlanner</title>
+  </head>
+<body style="overflow: hidden; margin: 0; padding: 0;">
+<canvas id="canvas" width="500" height="500" style="
+  margin: 0;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  "></canvas>
+
+<p id="robotXY">
+  Robot X = 0;
+  Robot Y = 0;
+</p>
+
+<p id="nextXY">
+  Next X = 0;
+  Next Y = 0;
+</p>
+
+<p id="moveDis">
+  Move Distance = 0
+</p>
+<!--
+<p>List o' Instructioins (Right Click To Add Point, Ctrl+Z To Undo, Ctrl+Shift+Z To Redo Once):</p>
+<div id="listOInstructions">
+-->
+</div>
+
+<script type="text/javascript">
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext('2d');
+
+const PI = 3.14159265;
+
+//dimensions of square robot
+var robotDim = 55;
+
+const listOInstructions = document.getElementById("listOInstructions");
+var listOfPoints = [];
+
+//get field img
+const fieldImg = new Image();
+  fieldImg.src = 'field2D.jpg';
+  fieldImg.onload = function(){
+    redraw();
+  }
+
+const robotXYHTML = document.getElementById("robotXY");
+const nextXYHTML = document.getElementById("nextXY");
+const moveDis = document.getElementById("moveDis");
+
+//calculate the angle betweent the robot's yaw vector, and the vector from the robot to the x,y it wants
+//to travel to (Yaw Vector will be made using unit circle with GPS10.yaw() e.g <cos(yaw), sin(yaw)>)
+//Travel Vector will be made by subtracting robot x,y from point x,y
+//then use dot product equation to get angle between the two vectors.
+class vector2 {
+  x;
+  y;
+};
+
+var yawVector = new vector2();
+var travelVector = new vector2();
+var robotPos = new vector2();
+  robotPos.x = 0;
+  robotPos.y = 0;
+var rYaw = 30; //in degrees
+
+//takes x,y of point you want to travel to
+function calcAngleBetweenYAndT(x, y)
+{
+  var yaw = rYaw * PI / 180;  //yaw() returns degrees
+
+  //get unit circle x,y from yaw angle
+  yawVector.x = Math.cos(yaw);
+  yawVector.y = Math.sin(yaw);
+
+  //get travel vector (use robot location as origin)
+  travelVector.x = x - robotPos.x;
+  travelVector.y = y - robotPos.y;
+
+  //get dot product of vectors
+  var dotProduct = yawVector.x * travelVector.x + yawVector.y * travelVector.y;
+
+  //find magnitudes with distance formula
+  var yDistance = 1;  //always 1 because uses <cos(yaw), sin(yaw)> unit circle length
+  var tDistance = Math.sqrt(travelVector.x * travelVector.x + travelVector.y * travelVector.y);
+
+  var scaledX = travelVector.x * (70.25/(canvas.width/2));
+  var scaledY = -1 * travelVector.y * (70.25/( canvas.height/2));
+  var scaledDistance = Math.sqrt(scaledX * scaledX + scaledY * scaledY);
+  moveDis.innerText = "Move Distance = " + scaledDistance;
+
+
+  var a = Math.acos(dotProduct / (yDistance * tDistance));
+  a = a * 180 / PI; //convert back to degrees
+
+  //Check if point is below or above robot y (cause acos only returns 0-180 degrees)
+  //equation in check is based on a . b = |a|*|b|*cos(theta)
+  //we then get a perpendicular point to yawVector by making a new point (x,y) = (-yawVector.y, yawVector.x)
+  //we know the magnitudes multiplied |a|*|b| will always be positive
+  //we also know that if the cos of the angle theta between the perpendicular of yawVector and travelVector
+  //is negative then 90 < theta <= 180 or positive then 0 <= theta <= 90
+  //therefore if the dot product of a . b is negative, the angle was obtuse
+  //if the dot product was positive the angle was acute
+  //refer to pg. 808, Chapt. 12 Vectors and the Geometry of Space, James Stewart Calculus
+  if (travelVector.y*yawVector.x - travelVector.x*yawVector.y >= 0) { //dot product of perpendicular yawVector and yawVector
+    return a;
+  } else {
+    return -1 * a;
+  }
+}
+
+//takes a negative or positive number and performs true modulo
+//(% in JS and C/C++ I think is remainder: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/Remainder)
+//kinda like simulated integer underflow/ overflow except 0 - 1 = 359 which is fine because 360 degrees == 0 degrees
+function clampTo360(g) {
+    return (g % 360 + 360) % 360
+}
+
+function redraw(x, y, newYaw){
+  //draw starting picture
+  ctx.drawImage(fieldImg, 0, 0, fieldImg.width, fieldImg.height, 0, 0, canvas.width, canvas.height);
+
+  //draw axis
+  ctx.fillStyle = "white";
+  ctx.fillRect(canvas.width/2 - 1, 0, 3, canvas.height);
+  ctx.fillRect(0, canvas.height/2 - 1,  canvas.width, 3);
+
+  //robot
+  ctx.fillStyle = "red";
+  ctx.fillRect( (robotPos.x - robotDim/2) + canvas.width/2 - 5, (robotPos.y - robotDim/2) + canvas.height/2 - 5, robotDim, robotDim);
+
+  //robot yaw vector
+  var tempX = Math.cos(rYaw * PI / 180);
+  var tempY = Math.sin(rYaw * PI / 180);
+
+  ctx.strokeStyle = "red";
+  ctx.beginPath();
+  ctx.moveTo(robotPos.x + canvas.width/2, robotPos.y + canvas.height/2);
+  ctx.lineWidth = 2;
+  ctx.lineTo(tempX * 2 * robotDim + robotPos.x + canvas.width/2, tempY * 2 * robotDim + robotPos.y + canvas.height/2);
+  ctx.stroke();
+
+  //travel vector
+  ctx.strokeStyle = "blue";
+  ctx.beginPath();
+  ctx.moveTo(robotPos.x + canvas.width/2, robotPos.y + canvas.height/2);
+  ctx.lineWidth = 2;
+  ctx.lineTo(x + canvas.width/2, y + canvas.height/2);
+  ctx.stroke();
+
+  //draw green line for where robot will end after turning
+  //for switching which tool is pointing towards x,y, add 180
+  //var turnAngle = clampTo360(newYaw + rYaw) + 180;
+  var turnAngle = clampTo360(newYaw + rYaw);
+  //console.log(turnAngle)
+  var turnX = Math.cos(turnAngle * PI / 180);
+  var turnY = Math.sin(turnAngle * PI / 180);
+
+  ctx.strokeStyle = "green";
+  ctx.beginPath();
+  ctx.moveTo(robotPos.x + canvas.width/2, robotPos.y + canvas.height/2);
+  ctx.lineWidth = 2;
+  ctx.lineTo(turnX * 40 + robotPos.x + canvas.width/2, turnY * 40 + robotPos.y + canvas.height/2);
+  ctx.stroke();
+}
+
+var movingRobot = false;
+var distanceFromRobotX = 0;
+var distanceFromRobotY = 0;
+canvas.addEventListener('mousedown', function(e){
+  var rect = canvas.getBoundingClientRect();
+  //gets points based on middle of canvas being (0,0)
+  var mX = e.x - rect.left - canvas.width/2;
+  var mY = e.y - rect.top - canvas.height/2;
+  //console.log(mX + ", " + mY);
+  var scaledX = mX * (70.25/(canvas.width/2));
+  var scaledY = -1 * mY * (70.25/( canvas.height/2));
+  nextXYHTML.innerText = "Next X = " + scaledX + " Next Y = " + scaledY;
+
+  distanceFromRobotX = (e.x - rect.left - canvas.width/2) - (robotPos.x - robotDim/2);
+  distanceFromRobotY = (e.y - rect.top - canvas.height/2) - (robotPos.y + robotDim/2);
+
+  if(Math.abs( distanceFromRobotX ) < robotDim * 9/10 && Math.abs( distanceFromRobotY ) < robotDim * 9/10 && !movingRobot){
+    movingRobot = true;
+    redraw();
+  }else{
+  //  console.log(calcAngleBetweenYAndT(mX, mY));
+    redraw(mX, mY, calcAngleBetweenYAndT(mX, mY));
+  }
+});
+
+canvas.addEventListener('mousemove', function(e){
+  if(movingRobot) {
+    var rect = canvas.getBoundingClientRect();
+    robotPos.x = e.x - rect.left - canvas.width/2 - distanceFromRobotX/2;
+    robotPos.y = e.y - rect.top - canvas.height/2 - distanceFromRobotY/2;
+
+    //vex field 140.5 x 140.5 in
+    //140.5 / 2 = 70.25
+    robotXYHTML.innerText = "Robot X = " + robotPos.x * (70.25/(canvas.width/2)) + " Robot Y = " + -1 * robotPos.y * (70.25/( canvas.height/2));
+
+    redraw();
+  }
+});
+
+canvas.addEventListener('mouseup', function(e){
+  movingRobot = false;
+});
+
+canvas.addEventListener('contextmenu', function(e) {
+   event.preventDefault();  //stop right click menu showin up
+   //var mX = e.x - rect.left - canvas.width/2;
+   //var mY = e.y - rect.top - canvas.height/2;
+});
+/*
+var toggleKeyRedo = false;
+var toggleKey = false;
+var removedElement;
+canvas.addEventListener("keydown", function(e){
+  if (e.ctrlKey && e.which = "z") {
+    if (e.shiftKey && removedElement ) {
+      listOPoints.push(removedElement);
+      removedElement = undefined;
+    } else {
+      if (e.which = "z" && !toggleKey) {
+        removedElement = listOPoints.pop(); //remove last element
+
+
+        toggleKey = true;
+      }
+    }
+  }
+});
+
+canvas.addEventListener("keyup", function(e){
+  toggleKey = false;
+});
+*/
+</script>
+</body>
+</html>

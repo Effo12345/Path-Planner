@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="utf-8">
+    <title>skillsPlanner</title>
+	<script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+	<script src="http://ajax.googleapis.com/ajax/libs/jqueryui/1.13.1/jquery-ui.min.js"></script>
+  </head>
+<body style="overflow: hidden; margin: 0; padding: 0;">
+<canvas id="canvas" width="500" height="500" style="
+  margin: 0;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  "></canvas>
+
+<h1 id="robotXY">
+  Robot X = 0;
+  Robot Y = 0;
+</h1>
+
+<button onclick="newWaypoint()">Create waypoint</button>
+<button onclick="output()">Output Data</button>
+<br> <br>
+Input Waypoints<br>
+<textarea name="Input" cols="40" rows="5"></textarea>
+<!--
+<p>List o' Instructioins (Right Click To Add Point, Ctrl+Z To Undo, Ctrl+Shift+Z To Redo Once):</p>
+<div id="listOInstructions">
+-->
+</div>
+
+<script type="text/javascript">
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext('2d');
+
+
+
+//dimensions of square robot
+var robotDim = 10;
+
+const listOInstructions = document.getElementById("listOInstructions");
+var listOfPoints = [];
+
+//get field img
+const fieldImg = new Image();
+  fieldImg.src = 'field2D.jpg';
+  fieldImg.onload = function(){
+    redraw();
+  }
+
+const robotXYHTML = document.getElementById("robotXY");
+const moveDis = document.getElementById("moveDis");
+
+
+var testingVal = 70.86614;
+
+
+//*******************
+//*******************
+//*******************
+//*******************
+//*******************
+//*******************
+//*******************
+//*******************
+//Pure pursuit stuffs
+var spacing = 6;
+var weight_smooth = 0.865;
+var weight_data = 1 - weight_smooth;
+var tolerance = 0.001;
+
+
+
+
+
+
+class vector2 {
+  x;
+  y;
+};
+
+var robotPos = new vector2();
+  robotPos.x = 0;
+  robotPos.y = 0;
+  
+var waypoints = [robotPos];
+var path = [];
+  
+function newWaypoint() {
+	ctx.beginPath();
+	ctx.arc(canvas.width/2, canvas.height/2, robotDim, 0, 2 * Math.PI, false);
+	ctx.fill();
+	
+	var tmp = new vector2();
+	tmp.x = 0;
+	tmp.y = 0;
+	
+	waypoints.push(tmp);
+	redraw();
+}
+
+function round(num) {
+	return Math.round((num + Number.EPSILON) * 100) / 100;
+}
+
+function output() {
+	var out = "{" + round(fieldW(waypoints[0].x))+ ", " +  -1 * round(fieldH(waypoints[0].y)) + "}"
+	if(waypoints.length > 1)
+		out += ",<br>";
+	else
+		out += "<br>";
+	for(let i = 1; i < waypoints.length - 1; i++) {
+		  out += "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+		  out += "{" + round(fieldW(waypoints[i].x))+ ", " +  -1 * round(fieldH(waypoints[i].y)) + "},<br>";
+	}
+	if(waypoints.length > 1) {
+		out += "&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;"
+		out += "{" + round(fieldW(waypoints[waypoints.length - 1].x))+ ", " +  -1 * round(fieldH(waypoints[waypoints.length - 1].y)) + "}<br>";
+	}
+
+	var w = window.open("about:blank");
+	w.document.write(out);
+}
+
+function canvasW(w) {
+	return w / (testingVal/(canvas.width/2));
+}
+
+function canvasH(h) {
+	return h / (testingVal/(canvas.width/2));
+}
+
+function fieldW(w) {
+	return w * (testingVal/(canvas.width/2));
+}
+
+function fieldH(h) {
+	return h * (testingVal/(canvas.width/2));
+}
+
+function redraw(x, y){
+  //draw starting picture
+  ctx.drawImage(fieldImg, 0, 0, fieldImg.width, fieldImg.height, 0, 0, canvas.width, canvas.height);
+
+  //draw axis
+  ctx.fillStyle = "white";
+  ctx.fillRect(canvas.width/2 - 1, 0, 3, canvas.height);
+  ctx.fillRect(0, canvas.height/2 - 1,  canvas.width, 3);
+  
+  
+  //Path computing
+  for(let i = 0; i < waypoints.length - 1; i++) {
+	var vector = new vector2();
+	
+	vector.x = waypoints[i+1].x - waypoints[i].x;
+	vector.y = waypoints[i+1].y - waypoints[i].y;
+	
+	vector.x = fieldW(vector.x);
+	vector.y = fieldH(vector.y);
+	
+	var magnitude = Math.sqrt(Math.pow(vector.x, 2) + Math.pow(vector.y, 2));
+	
+	var num_points_that_fit = Math.ceil(magnitude / spacing);
+	
+	vector.x = (vector.x / magnitude) * spacing;
+	vector.y = (vector.y / magnitude) * spacing;
+	
+	for(let j = 0; j < num_points_that_fit; j++) {
+		var tmp_vector = new vector2();
+		tmp_vector.x = fieldW(waypoints[i].x) + (vector.x * j);
+		tmp_vector.y = fieldH(waypoints[i].y) + (vector.y * j);
+		
+		path.push(tmp_vector);
+	}
+  }
+  
+	var curvedPath = [];
+	
+	//Copy array
+	for(let i = 0; i < path.length; i++) {
+		var tmp = new vector2();
+		tmp.x = path[i].x;
+		tmp.y = path[i].y;
+		
+		curvedPath.push(tmp);
+	}
+	
+	//Smoother
+	var change = tolerance;
+	while (change >= tolerance) {
+		change = 0.0;
+		for(let i = 1; i < path.length - 1; i++) {
+			var auxX = curvedPath[i].x;
+			curvedPath[i].x += weight_data * (path[i].x - curvedPath[i].x) + weight_smooth * (curvedPath[i-1].x + curvedPath[i+1].x - (2.0 * curvedPath[i].x));
+			change += Math.abs(auxX - curvedPath[i].x);
+			
+			var auxY = curvedPath[i].y;
+			curvedPath[i].y += weight_data * (path[i].y - curvedPath[i].y) + weight_smooth * (curvedPath[i-1].y + curvedPath[i+1].y - (2.0 * curvedPath[i].y));
+			change += Math.abs(auxY - curvedPath[i].y);
+		}
+	}
+  
+  //Path drawing
+  ctx.fillStyle = "blue";
+  for(let i = 0; i < path.length; i++) {
+	ctx.beginPath();
+	ctx.arc(canvasW(curvedPath[i].x) + canvas.width/2, canvasH(curvedPath[i].y) + canvas.height/2, robotDim - 4, 0, 2 * Math.PI, false);
+	ctx.fill();
+  }
+  path.length = 0;
+  //curvedPath.length = 0;
+
+  //Waypoints
+  ctx.fillStyle = "red";
+  //ctx.fillRect( (robotPos.x - robotDim/2) + canvas.width/2 - 5, (robotPos.y - robotDim/2) + canvas.height/2 - 5, robotDim, robotDim);
+  for(let i = 0; i < waypoints.length; i++) {
+	ctx.beginPath();
+	ctx.arc(waypoints[i].x + canvas.width/2, waypoints[i].y + canvas.height/2, robotDim, 0, 2 * Math.PI, false);
+	ctx.fill();
+  }
+}
+
+var movingRobot = false;
+var moveIndex = 0;
+var distanceFromRobotX = 0;
+var distanceFromRobotY = 0;
+canvas.addEventListener('mousedown', function(e){
+    var lastClosestDistance = 1000;
+	var lastClosestIndex = 0;
+	var smallestX = 0;
+	var smallestY = 0;
+	
+	for(let i = 0; i < waypoints.length; i++) {
+		var rect = canvas.getBoundingClientRect();
+		//gets points based on middle of canvas being (0,0)
+		var mX = e.x - rect.left - canvas.width/2;
+		var mY = e.y - rect.top - canvas.height/2;
+		//console.log(mX + ", " + mY);
+		var scaledX = mX * (testingVal/(canvas.width/2));
+		var scaledY = -1 * mY * (testingVal/( canvas.height/2));
+
+		distanceFromRobotX = (e.x - rect.left - canvas.width/2) - (waypoints[i].x - robotDim/2);
+		distanceFromRobotY = (e.y - rect.top - canvas.height/2) - (waypoints[i].y + robotDim/2);
+		
+		var distance = Math.sqrt(Math.pow(distanceFromRobotX, 2) + Math.pow(distanceFromRobotY, 2));
+		
+		//console.log(lastClosestIndex);
+		
+		if(distance < lastClosestDistance) {
+			lastClosestDistance = distance;
+			lastClosestIndex = i;
+			smallestX = distanceFromRobotX;
+			smallestY = distanceFromRobotY;
+		}
+	}
+	
+	distanceFromRobotX = smallestX;
+	distanceFromRoboty = smallestY;
+
+  if(Math.abs( smallestX ) < robotDim * 9/10 && Math.abs( smallestY ) < robotDim * 9/10 && !movingRobot){
+    movingRobot = true;
+	moveIndex = lastClosestIndex;
+	robotXYHTML.innerText = "Robot X = " + round(fieldW(waypoints[moveIndex].x)) + " Robot Y = " + -1 * round(fieldH(waypoints[moveIndex].y));
+    redraw();
+	}
+});
+
+canvas.addEventListener('mousemove', function(e){
+  if(movingRobot) {
+    var rect = canvas.getBoundingClientRect();
+    waypoints[moveIndex].x = e.x - rect.left - canvas.width/2; //- distanceFromRobotX/2;
+    waypoints[moveIndex].y = e.y - rect.top - canvas.height/2; //- distanceFromRobotY/2;
+
+    //vex field 140.5 x 140.5 in
+    //140.5 / 2 = 70.25
+    robotXYHTML.innerText = "Robot X = " + round(fieldW(waypoints[moveIndex].x)) + " Robot Y = " + -1 * round(fieldH(waypoints[moveIndex].y));
+
+    redraw();
+  }
+});
+
+canvas.addEventListener('mouseup', function(e){
+  movingRobot = false;
+});
+
+canvas.addEventListener('contextmenu', function(e) {
+   event.preventDefault();  //stop right click menu showin up
+   //var mX = e.x - rect.left - canvas.width/2;
+   //var mY = e.y - rect.top - canvas.height/2;
+});
+
+var area = document.querySelector('textarea[name="Input"]');
+area.addEventListener("input", function() {
+	if(area != null) {
+		let inputData = area.value;
+		console.log(inputData);
+
+		var tmpWaypoints = [];
+		var nextSearch = 0;
+		for(let i = 0; i < (inputData.match(/\n/g) || []).length + 1; i++) {
+			var tmp = new vector2();
+
+			var tmpx = inputData.substring(
+				inputData.indexOf("{", nextSearch) + 1,
+				inputData.indexOf(",", nextSearch)
+			)
+			console.log(tmpx);
+			tmpx = canvasW(tmpx * 1);
+			var tmpy = inputData.substring(
+				inputData.indexOf(",", nextSearch) + 2,
+				inputData.indexOf("}", nextSearch)
+			)
+			console.log(tmpy);
+			tmpy = canvasH(tmpy * -1);
+
+			tmp.x = tmpx;
+			tmp.y = tmpy;
+
+			tmpWaypoints.push(tmp);
+			nextSearch = inputData.indexOf("\n", nextSearch + 1);
+		}
+		waypoints = tmpWaypoints;
+		for(let i = 0; i < tmpWaypoints.length; i++)
+			console.log(tmpWaypoints[i]);
+		for(let i = 0; i < waypoints.length; i++)
+			console.log(tmpWaypoints[i]);
+		redraw();
+	}
+}, false);
+/*
+var toggleKeyRedo = false;
+var toggleKey = false;
+var removedElement;
+canvas.addEventListener("keydown", function(e){
+  if (e.ctrlKey && e.which = "z") {
+    if (e.shiftKey && removedElement ) {
+      listOPoints.push(removedElement);
+      removedElement = undefined;
+    } else {
+      if (e.which = "z" && !toggleKey) {
+        removedElement = listOPoints.pop(); //remove last element
+
+
+        toggleKey = true;
+      }
+    }
+  }
+});
+
+canvas.addEventListener("keyup", function(e){
+  toggleKey = false;
+});
+*/
+</script>
+</body>
+</html>
